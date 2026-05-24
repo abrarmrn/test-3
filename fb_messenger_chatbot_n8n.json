@@ -1,0 +1,670 @@
+{
+  "name": "FB Messenger AI Chatbot — Bangla/Banglish",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## FB Messenger AI Chatbot (Bangla / Banglish)\n\n**Before activating, set these once:**\n1. Replace every `REPLACE_GOOGLE_SHEET_ID` with your Google Sheet ID (from the sheet URL).\n2. Set FB Page token in the **Send FB Reply** & **Send Followup** nodes (header `Authorization` value).\n3. Connect credentials:\n   - Google Sheets OAuth2\n   - OpenAI API\n   - Telegram Bot\n4. In Telegram nodes, set your `chatId` (Telegram CHAT_ID for support alerts).\n5. Webhook URL → paste into Facebook App → Messenger → Webhook callback URL.\n\n**Flow:**\nMessenger Webhook → extract text/audio → (Whisper transcribe if audio) → load User row + Products catalog from Google Sheets → AI Agent (OpenAI + Simple Memory, sessionKey = psid) → JSON output is routed by Switch:\n  • `order_update` → upsert Orders sheet\n  • `lead_update` → update Users sheet\n  • `human_support` → notify you on Telegram\n  • `reply` → just send back\nFinally update Users `last_user_msg / last_bot_msg / last_message_at`, then send the reply to FB.\n\nSeparate Schedule Trigger runs every 8 hours, finds leads with no activity > 8h and sends a friendly Banglish nudge, then bumps `followup_count`.",
+        "height": 460,
+        "width": 520
+      },
+      "id": "note-readme",
+      "name": "README",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-1760, -120]
+    },
+
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "fb-messenger",
+        "responseMode": "onReceived",
+        "responseData": "EVENT_RECEIVED",
+        "options": {}
+      },
+      "id": "n-webhook",
+      "name": "FB Messenger Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-1200, 220],
+      "webhookId": "fb-messenger-webhook"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "id": "a1", "name": "psid", "value": "={{ $json.body.entry[0].messaging[0].sender.id }}", "type": "string" },
+            { "id": "a2", "name": "text", "value": "={{ $json.body.entry[0].messaging[0].message.text || '' }}", "type": "string" },
+            { "id": "a3", "name": "attachment_type", "value": "={{ ($json.body.entry[0].messaging[0].message.attachments && $json.body.entry[0].messaging[0].message.attachments[0] && $json.body.entry[0].messaging[0].message.attachments[0].type) || '' }}", "type": "string" },
+            { "id": "a4", "name": "attachment_url", "value": "={{ ($json.body.entry[0].messaging[0].message.attachments && $json.body.entry[0].messaging[0].message.attachments[0] && $json.body.entry[0].messaging[0].message.attachments[0].payload && $json.body.entry[0].messaging[0].message.attachments[0].payload.url) || '' }}", "type": "string" },
+            { "id": "a5", "name": "ts", "value": "={{ $now.toISO() }}", "type": "string" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "n-extract",
+      "name": "Extract Message",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [-980, 220]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.attachment_type }}",
+              "rightValue": "audio",
+              "operator": { "type": "string", "operation": "equals", "name": "filter.operator.equals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "n-is-audio",
+      "name": "Is Audio?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-760, 220]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.attachment_url }}",
+        "options": { "response": { "response": { "responseFormat": "file" } } }
+      },
+      "id": "n-dl-audio",
+      "name": "Download Audio",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-540, 100]
+    },
+    {
+      "parameters": {
+        "resource": "audio",
+        "operation": "transcribe",
+        "binaryPropertyName": "data",
+        "options": {}
+      },
+      "id": "n-whisper",
+      "name": "Transcribe Audio",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [-320, 100],
+      "credentials": {
+        "openAiApi": { "id": "OPENAI_CREDENTIAL_ID", "name": "OpenAI account" }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "id": "t1", "name": "psid", "value": "={{ $('Extract Message').item.json.psid }}", "type": "string" },
+            { "id": "t2", "name": "text", "value": "={{ $json.text }}", "type": "string" },
+            { "id": "t3", "name": "ts", "value": "={{ $('Extract Message').item.json.ts }}", "type": "string" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "n-set-transcript",
+      "name": "Use Transcript",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [-100, 100]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "id": "x1", "name": "psid", "value": "={{ $json.psid }}", "type": "string" },
+            { "id": "x2", "name": "text", "value": "={{ $json.text }}", "type": "string" },
+            { "id": "x3", "name": "ts", "value": "={{ $json.ts }}", "type": "string" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "n-pass-text",
+      "name": "Use Text",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [-540, 340]
+    },
+    {
+      "parameters": { "numberInputs": 2 },
+      "id": "n-merge-msg",
+      "name": "Merge Message",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [120, 220]
+    },
+
+    {
+      "parameters": {
+        "documentId": { "__rl": true, "value": "REPLACE_GOOGLE_SHEET_ID", "mode": "id" },
+        "sheetName": { "__rl": true, "value": "Users", "mode": "name" },
+        "filtersUI": {
+          "values": [
+            { "lookupColumn": "psid", "lookupValue": "={{ $json.psid }}" }
+          ]
+        },
+        "options": { "returnAllMatches": false, "headerRow": 4, "dataStartRow": 5 }
+      },
+      "id": "n-get-user",
+      "name": "Get User Row",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "alwaysOutputData": true,
+      "position": [340, 120],
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "GSHEETS_CREDENTIAL_ID", "name": "Google Sheets account" }
+      }
+    },
+    {
+      "parameters": {
+        "documentId": { "__rl": true, "value": "REPLACE_GOOGLE_SHEET_ID", "mode": "id" },
+        "sheetName": { "__rl": true, "value": "Products", "mode": "name" },
+        "options": { "returnAllMatches": true, "headerRow": 4, "dataStartRow": 5 }
+      },
+      "id": "n-get-products",
+      "name": "Get Products",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [340, 320],
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "GSHEETS_CREDENTIAL_ID", "name": "Google Sheets account" }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Combine inputs: user row, products list, and current message into one object for the agent.\nconst userItems = $input.first().json ? [$input.first().json] : [];\nconst productItems = $items('Get Products').map(i => i.json);\nconst msg = $('Merge Message').first().json;\n\nconst userRow = userItems[0] || {};\nconst products = productItems\n  .filter(p => (p.status || '').toString().toLowerCase() === 'active')\n  .map(p => `- ${p.product_id || ''} | ${p.name || ''} | size: ${p.size || ''} | color: ${p.color || ''} | price: ${p.price || ''} BDT | stock: ${p.stock || 0} | ${p.description || ''}`)\n  .join('\\n');\n\nreturn [{\n  json: {\n    psid: msg.psid,\n    text: msg.text || '',\n    ts: msg.ts,\n    user_name: userRow.name || '',\n    user_status: userRow.status || 'new',\n    ai_enabled: userRow.ai_enabled === undefined ? true : (userRow.ai_enabled === true || String(userRow.ai_enabled).toUpperCase() === 'TRUE'),\n    last_message_at: userRow.last_message_at || '',\n    products_text: products || '(no active products in catalog)'\n  }\n}];\n"
+      },
+      "id": "n-prep-input",
+      "name": "Prepare Agent Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [560, 220]
+    },
+
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.text }}",
+        "options": {
+          "systemMessage": "Tumi ekta Bangladeshi e-commerce shop er friendly Facebook Messenger assistant.\n\nREPLY STYLE (sheet-driven):\n- Default reply Banglish e (Bangla written using English letters), max 1-2 short sentences.\n- Customer pure Bangla likhle pure Bangla te reply koro.\n- Always polite, human-friendly, emoji use sparingly (max 1).\n- Never invent product, price, stock — sudhu CATALOG theke information use korbe.\n\nACTIONS — chose exactly one:\n- \"reply\"          → general chat / FAQ / product info.\n- \"order_update\"   → customer order place korte chai / confirm korte chai / change korte chai. Fill `order` object.\n- \"lead_update\"    → customer name / phone / address share korlo, OR status change (new→lead→customer→closed). Fill `lead` object.\n- \"human_support\"  → customer human/agent/manager chai, OR complaint, OR tumi answer dite parcho na, OR sensitive issue. Fill `reply` with a short \"ekjon agent ekhoni connect korbe\" message.\n\nSTRICT OUTPUT FORMAT — return ONLY valid JSON, no prose, no markdown, no code fences:\n{\n  \"reply\": \"<short Banglish/Bangla message to the customer>\",\n  \"action\": \"reply\" | \"order_update\" | \"lead_update\" | \"human_support\",\n  \"order\": { \"product\": \"\", \"size\": \"\", \"quantity\": 1, \"price\": 0, \"address\": \"\", \"phone\": \"\", \"status\": \"pending\", \"note\": \"\" } ,\n  \"lead\":  { \"name\": \"\", \"status\": \"new\" }\n}\nIf a field is unknown, use empty string \"\" or 0. Never omit keys.\n\nCATALOG (only these products are real):\n{{ $json.products_text }}\n\nCUSTOMER PROFILE:\npsid: {{ $json.psid }}\nname: {{ $json.user_name }}\nstatus: {{ $json.user_status }}\nlast_message_at: {{ $json.last_message_at }}",
+          "maxIterations": 5
+        }
+      },
+      "id": "n-agent",
+      "name": "AI Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [820, 220]
+    },
+    {
+      "parameters": {
+        "model": { "__rl": true, "value": "gpt-4o-mini", "mode": "list", "cachedResultName": "gpt-4o-mini" },
+        "options": { "temperature": 0.4 }
+      },
+      "id": "n-llm",
+      "name": "OpenAI Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [720, 440],
+      "credentials": {
+        "openAiApi": { "id": "OPENAI_CREDENTIAL_ID", "name": "OpenAI account" }
+      }
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $('Prepare Agent Input').item.json.psid }}",
+        "contextWindowLength": 5
+      },
+      "id": "n-memory",
+      "name": "Simple Memory",
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [900, 440]
+    },
+
+    {
+      "parameters": {
+        "jsCode": "// Robustly parse the agent's JSON output.\nconst raw = ($json.output || $json.text || '').toString().trim();\nlet parsed = null;\ntry {\n  // Strip code fences if present\n  const cleaned = raw.replace(/^```(?:json)?/i, '').replace(/```$/,'').trim();\n  parsed = JSON.parse(cleaned);\n} catch (e) {\n  // Fallback: try to find first JSON object inside text\n  const m = raw.match(/\\{[\\s\\S]*\\}/);\n  if (m) { try { parsed = JSON.parse(m[0]); } catch (_) {} }\n}\nif (!parsed) parsed = { reply: raw || 'Sorry, ektu por abar try korben please.', action: 'reply', order: {}, lead: {} };\n\nconst ctx = $('Prepare Agent Input').item.json;\nreturn [{\n  json: {\n    psid: ctx.psid,\n    user_message: ctx.text,\n    reply: parsed.reply || '',\n    action: (parsed.action || 'reply').toLowerCase(),\n    order: parsed.order || {},\n    lead: parsed.lead || {},\n    ts: ctx.ts\n  }\n}];\n"
+      },
+      "id": "n-parse",
+      "name": "Parse Agent Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1080, 220]
+    },
+
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": { "caseSensitive": false, "leftValue": "", "typeValidation": "loose", "version": 2 },
+                "conditions": [
+                  { "id": "r1", "leftValue": "={{ $json.action }}", "rightValue": "order_update",
+                    "operator": { "type": "string", "operation": "equals", "name": "filter.operator.equals" } }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "order_update"
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": false, "leftValue": "", "typeValidation": "loose", "version": 2 },
+                "conditions": [
+                  { "id": "r2", "leftValue": "={{ $json.action }}", "rightValue": "lead_update",
+                    "operator": { "type": "string", "operation": "equals", "name": "filter.operator.equals" } }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "lead_update"
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": false, "leftValue": "", "typeValidation": "loose", "version": 2 },
+                "conditions": [
+                  { "id": "r3", "leftValue": "={{ $json.action }}", "rightValue": "human_support",
+                    "operator": { "type": "string", "operation": "equals", "name": "filter.operator.equals" } }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "human_support"
+            }
+          ]
+        },
+        "options": { "fallbackOutput": "extra", "renameFallbackOutput": "reply" }
+      },
+      "id": "n-switch",
+      "name": "Route Action",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [1300, 220]
+    },
+
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": { "__rl": true, "value": "REPLACE_GOOGLE_SHEET_ID", "mode": "id" },
+        "sheetName": { "__rl": true, "value": "Orders", "mode": "name" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "order_id": "=ORD-{{ $json.psid }}-{{ $now.toMillis() }}",
+            "psid": "={{ $json.psid }}",
+            "customer_name": "={{ ($json.lead && $json.lead.name) || '' }}",
+            "product": "={{ $json.order.product || '' }}",
+            "size": "={{ $json.order.size || '' }}",
+            "quantity": "={{ $json.order.quantity || 1 }}",
+            "price": "={{ $json.order.price || 0 }}",
+            "address": "={{ $json.order.address || '' }}",
+            "phone": "={{ $json.order.phone || '' }}",
+            "status": "={{ $json.order.status || 'pending' }}",
+            "note": "={{ $json.order.note || '' }}",
+            "created_at": "={{ $now.toISO() }}"
+          },
+          "matchingColumns": ["psid"],
+          "schema": [
+            { "id": "order_id", "displayName": "order_id", "type": "string" },
+            { "id": "psid", "displayName": "psid", "type": "string" },
+            { "id": "customer_name", "displayName": "customer_name", "type": "string" },
+            { "id": "product", "displayName": "product", "type": "string" },
+            { "id": "size", "displayName": "size", "type": "string" },
+            { "id": "quantity", "displayName": "quantity", "type": "number" },
+            { "id": "price", "displayName": "price", "type": "number" },
+            { "id": "address", "displayName": "address", "type": "string" },
+            { "id": "phone", "displayName": "phone", "type": "string" },
+            { "id": "status", "displayName": "status", "type": "string" },
+            { "id": "note", "displayName": "note", "type": "string" },
+            { "id": "created_at", "displayName": "created_at", "type": "string" }
+          ]
+        },
+        "options": { "headerRow": 4, "dataStartRow": 5 }
+      },
+      "id": "n-upsert-order",
+      "name": "Upsert Order",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1560, -40],
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "GSHEETS_CREDENTIAL_ID", "name": "Google Sheets account" }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": { "__rl": true, "value": "REPLACE_GOOGLE_SHEET_ID", "mode": "id" },
+        "sheetName": { "__rl": true, "value": "Users", "mode": "name" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "psid": "={{ $json.psid }}",
+            "name": "={{ ($json.lead && $json.lead.name) || '' }}",
+            "status": "={{ ($json.lead && $json.lead.status) || 'lead' }}"
+          },
+          "matchingColumns": ["psid"],
+          "schema": [
+            { "id": "psid", "displayName": "psid", "type": "string" },
+            { "id": "name", "displayName": "name", "type": "string" },
+            { "id": "status", "displayName": "status", "type": "string" }
+          ]
+        },
+        "options": { "headerRow": 4, "dataStartRow": 5 }
+      },
+      "id": "n-update-lead",
+      "name": "Update Lead",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [1560, 160],
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "GSHEETS_CREDENTIAL_ID", "name": "Google Sheets account" }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "REPLACE_TELEGRAM_CHAT_ID",
+        "text": "=🚨 Human support needed\nCustomer PSID: {{ $json.psid }}\nMessage: {{ $json.user_message }}\nBot suggested: {{ $json.reply }}",
+        "additionalFields": { "parse_mode": "Markdown" }
+      },
+      "id": "n-tg",
+      "name": "Notify Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1560, 360],
+      "credentials": {
+        "telegramApi": { "id": "TELEGRAM_CREDENTIAL_ID", "name": "Telegram account" }
+      }
+    },
+
+    {
+      "parameters": { "numberInputs": 4 },
+      "id": "n-merge-actions",
+      "name": "Merge Replies",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [1800, 220]
+    },
+
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": { "__rl": true, "value": "REPLACE_GOOGLE_SHEET_ID", "mode": "id" },
+        "sheetName": { "__rl": true, "value": "Users", "mode": "name" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "psid": "={{ $json.psid }}",
+            "last_user_msg": "={{ $json.user_message }}",
+            "last_bot_msg": "={{ $json.reply }}",
+            "last_message_at": "={{ $now.toISO() }}"
+          },
+          "matchingColumns": ["psid"],
+          "schema": [
+            { "id": "psid", "displayName": "psid", "type": "string" },
+            { "id": "last_user_msg", "displayName": "last_user_msg", "type": "string" },
+            { "id": "last_bot_msg", "displayName": "last_bot_msg", "type": "string" },
+            { "id": "last_message_at", "displayName": "last_message_at", "type": "string" }
+          ]
+        },
+        "options": { "headerRow": 4, "dataStartRow": 5 }
+      },
+      "id": "n-update-activity",
+      "name": "Update User Activity",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [2020, 220],
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "GSHEETS_CREDENTIAL_ID", "name": "Google Sheets account" }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.facebook.com/v19.0/me/messages",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "access_token", "value": "REPLACE_FB_PAGE_TOKEN" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"recipient\": { \"id\": \"{{ $json.psid }}\" },\n  \"messaging_type\": \"RESPONSE\",\n  \"message\": { \"text\": {{ JSON.stringify($json.reply || 'Hi! Ekto por abar likhben please.') }} }\n}",
+        "options": {}
+      },
+      "id": "n-send-fb",
+      "name": "Send FB Reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2260, 220]
+    },
+
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            { "field": "hours", "hoursInterval": 8 }
+          ]
+        }
+      },
+      "id": "n-cron",
+      "name": "Every 8 Hours",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-1200, 880]
+    },
+    {
+      "parameters": {
+        "documentId": { "__rl": true, "value": "REPLACE_GOOGLE_SHEET_ID", "mode": "id" },
+        "sheetName": { "__rl": true, "value": "Users", "mode": "name" },
+        "options": { "returnAllMatches": true, "headerRow": 4, "dataStartRow": 5 }
+      },
+      "id": "n-get-leads",
+      "name": "Get All Users",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [-960, 880],
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "GSHEETS_CREDENTIAL_ID", "name": "Google Sheets account" }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Keep only stale leads: status in (new, lead) AND last_message_at older than 8h AND followup_count < 3\nconst now = Date.now();\nconst eightHrs = 8 * 60 * 60 * 1000;\nreturn $input.all()\n  .map(i => i.json)\n  .filter(u => {\n    const s = (u.status || '').toString().toLowerCase();\n    if (s !== 'new' && s !== 'lead') return false;\n    const last = u.last_message_at ? new Date(u.last_message_at).getTime() : 0;\n    if (!last || (now - last) < eightHrs) return false;\n    const fc = parseInt(u.followup_count || 0, 10);\n    if (fc >= 3) return false;\n    return true;\n  })\n  .map(u => ({ json: u }));\n"
+      },
+      "id": "n-filter-stale",
+      "name": "Filter Stale Leads",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-720, 880]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.facebook.com/v19.0/me/messages",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            { "name": "access_token", "value": "REPLACE_FB_PAGE_TOKEN" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"recipient\": { \"id\": \"{{ $json.psid }}\" },\n  \"messaging_type\": \"MESSAGE_TAG\",\n  \"tag\": \"ACCOUNT_UPDATE\",\n  \"message\": { \"text\": \"Hi {{ $json.name || 'bhai/apu' }}! 👋 Amader product gulo niye kichu janar thakle ekhon e bolun, ami help korbo.\" }\n}",
+        "options": {}
+      },
+      "id": "n-send-followup",
+      "name": "Send Followup",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-480, 880]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": { "__rl": true, "value": "REPLACE_GOOGLE_SHEET_ID", "mode": "id" },
+        "sheetName": { "__rl": true, "value": "Users", "mode": "name" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "psid": "={{ $json.psid }}",
+            "followup_count": "={{ (parseInt($json.followup_count || 0,10) + 1) }}",
+            "last_message_at": "={{ $now.toISO() }}"
+          },
+          "matchingColumns": ["psid"],
+          "schema": [
+            { "id": "psid", "displayName": "psid", "type": "string" },
+            { "id": "followup_count", "displayName": "followup_count", "type": "number" },
+            { "id": "last_message_at", "displayName": "last_message_at", "type": "string" }
+          ]
+        },
+        "options": { "headerRow": 4, "dataStartRow": 5 }
+      },
+      "id": "n-mark-followup-users",
+      "name": "Bump Followup Count",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [-220, 880],
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "GSHEETS_CREDENTIAL_ID", "name": "Google Sheets account" }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": { "__rl": true, "value": "REPLACE_GOOGLE_SHEET_ID", "mode": "id" },
+        "sheetName": { "__rl": true, "value": "Leads", "mode": "name" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "psid": "={{ $json.psid }}",
+            "name": "={{ $json.name || '' }}",
+            "last_message_at": "={{ $json.last_message_at || '' }}",
+            "followup_sent_at": "={{ $now.toISO() }}",
+            "outcome": "pending"
+          },
+          "matchingColumns": ["psid"],
+          "schema": [
+            { "id": "psid", "displayName": "psid", "type": "string" },
+            { "id": "name", "displayName": "name", "type": "string" },
+            { "id": "last_message_at", "displayName": "last_message_at", "type": "string" },
+            { "id": "followup_sent_at", "displayName": "followup_sent_at", "type": "string" },
+            { "id": "outcome", "displayName": "outcome", "type": "string" }
+          ]
+        },
+        "options": { "headerRow": 4, "dataStartRow": 5 }
+      },
+      "id": "n-log-leads",
+      "name": "Log to Leads",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [40, 880],
+      "credentials": {
+        "googleSheetsOAuth2Api": { "id": "GSHEETS_CREDENTIAL_ID", "name": "Google Sheets account" }
+      }
+    }
+  ],
+  "connections": {
+    "FB Messenger Webhook": {
+      "main": [[{ "node": "Extract Message", "type": "main", "index": 0 }]]
+    },
+    "Extract Message": {
+      "main": [[{ "node": "Is Audio?", "type": "main", "index": 0 }]]
+    },
+    "Is Audio?": {
+      "main": [
+        [{ "node": "Download Audio", "type": "main", "index": 0 }],
+        [{ "node": "Use Text", "type": "main", "index": 0 }]
+      ]
+    },
+    "Download Audio": {
+      "main": [[{ "node": "Transcribe Audio", "type": "main", "index": 0 }]]
+    },
+    "Transcribe Audio": {
+      "main": [[{ "node": "Use Transcript", "type": "main", "index": 0 }]]
+    },
+    "Use Transcript": {
+      "main": [[{ "node": "Merge Message", "type": "main", "index": 0 }]]
+    },
+    "Use Text": {
+      "main": [[{ "node": "Merge Message", "type": "main", "index": 1 }]]
+    },
+    "Merge Message": {
+      "main": [[{ "node": "Get Products", "type": "main", "index": 0 }]]
+    },
+    "Get Products": {
+      "main": [[{ "node": "Get User Row", "type": "main", "index": 0 }]]
+    },
+    "Get User Row": {
+      "main": [[{ "node": "Prepare Agent Input", "type": "main", "index": 0 }]]
+    },
+    "Prepare Agent Input": {
+      "main": [[{ "node": "AI Agent", "type": "main", "index": 0 }]]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [[{ "node": "AI Agent", "type": "ai_languageModel", "index": 0 }]]
+    },
+    "Simple Memory": {
+      "ai_memory": [[{ "node": "AI Agent", "type": "ai_memory", "index": 0 }]]
+    },
+    "AI Agent": {
+      "main": [[{ "node": "Parse Agent Output", "type": "main", "index": 0 }]]
+    },
+    "Parse Agent Output": {
+      "main": [[{ "node": "Route Action", "type": "main", "index": 0 }]]
+    },
+    "Route Action": {
+      "main": [
+        [{ "node": "Upsert Order", "type": "main", "index": 0 }],
+        [{ "node": "Update Lead", "type": "main", "index": 0 }],
+        [{ "node": "Notify Telegram", "type": "main", "index": 0 }],
+        [{ "node": "Merge Replies", "type": "main", "index": 3 }]
+      ]
+    },
+    "Upsert Order": {
+      "main": [[{ "node": "Merge Replies", "type": "main", "index": 0 }]]
+    },
+    "Update Lead": {
+      "main": [[{ "node": "Merge Replies", "type": "main", "index": 1 }]]
+    },
+    "Notify Telegram": {
+      "main": [[{ "node": "Merge Replies", "type": "main", "index": 2 }]]
+    },
+    "Merge Replies": {
+      "main": [[{ "node": "Update User Activity", "type": "main", "index": 0 }]]
+    },
+    "Update User Activity": {
+      "main": [[{ "node": "Send FB Reply", "type": "main", "index": 0 }]]
+    },
+
+    "Every 8 Hours": {
+      "main": [[{ "node": "Get All Users", "type": "main", "index": 0 }]]
+    },
+    "Get All Users": {
+      "main": [[{ "node": "Filter Stale Leads", "type": "main", "index": 0 }]]
+    },
+    "Filter Stale Leads": {
+      "main": [[{ "node": "Send Followup", "type": "main", "index": 0 }]]
+    },
+    "Send Followup": {
+      "main": [[{ "node": "Bump Followup Count", "type": "main", "index": 0 }]]
+    },
+    "Bump Followup Count": {
+      "main": [[{ "node": "Log to Leads", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "tags": [],
+  "pinData": {},
+  "meta": { "templateCredsSetupCompleted": false }
+}
