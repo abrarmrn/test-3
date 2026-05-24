@@ -178,7 +178,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Combine inputs: user row, products list, and current message into one object for the agent.\nconst userItems = $input.first().json ? [$input.first().json] : [];\nconst productItems = $items('Get Products').map(i => i.json);\nconst msg = $('Merge Message').first().json;\n\nconst userRow = userItems[0] || {};\nconst products = productItems\n  .filter(p => (p.status || '').toString().toLowerCase() === 'active')\n  .map(p => `- ${p.product_id || ''} | ${p.name || ''} | size: ${p.size || ''} | color: ${p.color || ''} | price: ${p.price || ''} BDT | stock: ${p.stock || 0} | ${p.description || ''}`)\n  .join('\\n');\n\nreturn [{\n  json: {\n    psid: msg.psid,\n    text: msg.text || '',\n    ts: msg.ts,\n    user_name: userRow.name || '',\n    user_status: userRow.status || 'new',\n    ai_enabled: userRow.ai_enabled === undefined ? true : (userRow.ai_enabled === true || String(userRow.ai_enabled).toUpperCase() === 'TRUE'),\n    last_message_at: userRow.last_message_at || '',\n    products_text: products || '(no active products in catalog)'\n  }\n}];\n"
+        "jsCode": "// Combine inputs: user row, products list, and current message into one object for the agent.\nconst userItem = $input.first();\nconst userRow = (userItem && userItem.json) || {};\n\n// Use modern n8n syntax: $('NodeName').all() instead of deprecated $items()\nconst productItems = $('Get Products').all().map(i => i.json);\nconst msg = $('Merge Message').first().json;\n\nconst products = productItems\n  .filter(p => (p.status || '').toString().toLowerCase() === 'active')\n  .map(p => `- ${p.product_id || ''} | ${p.name || ''} | size: ${p.size || ''} | color: ${p.color || ''} | price: ${p.price || ''} BDT | stock: ${p.stock || 0} | ${p.description || ''}`)\n  .join('\\n');\n\nreturn [{\n  json: {\n    psid: String(msg.psid || ''),\n    text: msg.text || '',\n    ts: msg.ts || new Date().toISOString(),\n    user_name: userRow.name || '',\n    user_status: userRow.status || 'new',\n    ai_enabled: userRow.ai_enabled === undefined ? true : (userRow.ai_enabled === true || String(userRow.ai_enabled).toUpperCase() === 'TRUE'),\n    last_message_at: userRow.last_message_at || '',\n    products_text: products || '(no active products in catalog)'\n  }\n}];\n"
       },
       "id": "n-prep-input",
       "name": "Prepare Agent Input",
@@ -227,6 +227,15 @@
       "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
       "typeVersion": 1.3,
       "position": [900, 440]
+    },
+
+    {
+      "parameters": {},
+      "id": "n-calc-tool",
+      "name": "Calculator",
+      "type": "@n8n/n8n-nodes-langchain.toolCalculator",
+      "typeVersion": 1,
+      "position": [1080, 440]
     },
 
     {
@@ -615,6 +624,9 @@
     },
     "Simple Memory": {
       "ai_memory": [[{ "node": "AI Agent", "type": "ai_memory", "index": 0 }]]
+    },
+    "Calculator": {
+      "ai_tool": [[{ "node": "AI Agent", "type": "ai_tool", "index": 0 }]]
     },
     "AI Agent": {
       "main": [[{ "node": "Parse Agent Output", "type": "main", "index": 0 }]]
