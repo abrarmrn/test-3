@@ -1,0 +1,313 @@
+{
+  "name": "01 \u2014 KB Sync (Products Sheet \u2192 Pinecone RAG)",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Workflow 1 \u2014 KB Sync to Pinecone\n\n**Purpose:** Read Products from Google Sheet, clean each row into a searchable document, embed via OpenAI, and upsert to Pinecone. Run on demand or on schedule.\n\n**Setup:**\n1. Replace `REPLACE_GOOGLE_SHEET_ID` in Get Products node.\n2. Create Pinecone index `fb-chatbot-kb` (dim=1536, cosine).\n3. Connect credentials: Google Sheets OAuth2, OpenAI, Pinecone.\n4. Run manually once, then keep schedule active for daily sync.",
+        "height": 260,
+        "width": 380
+      },
+      "id": "66466d27-2f06-475f-9d79-d253d98d5bb0",
+      "name": "README",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "2ddc0e17-318f-4dba-91e1-44661469cab5",
+      "name": "Run Manually",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 3 * * *"
+            }
+          ]
+        }
+      },
+      "id": "0a40c579-7869-4b86-b108-3bd2686a059b",
+      "name": "Daily Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Products",
+          "mode": "name"
+        },
+        "options": {
+          "returnAllMatches": true,
+          "headerRow": 4,
+          "dataStartRow": 5
+        }
+      },
+      "id": "31da9f9b-8c09-49e9-a779-c07e1e5dab5e",
+      "name": "Get Products",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        240,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "active",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "06ce8f5c-8421-4764-b3e8-978df8d5211a",
+      "name": "Only Active",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        480,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Convert one Products row into a clean searchable document.\n// Output: { content, metadata } per item.\nconst items = $input.all();\nconst out = [];\nfor (const it of items) {\n  const p = it.json;\n  const name = (p.name || '').toString().trim();\n  const cat  = (p.category || '').toString().trim();\n  const size = (p.size || '').toString().trim();\n  const color= (p.color || '').toString().trim();\n  const desc = (p.description || '').toString().trim();\n  const price= p.price;\n  const stock= p.stock;\n  const status=(p.status|| '').toString().trim();\n  // Build human-readable doc \u2014 covers product info, size, FAQ, objections.\n  const lines = [\n    `Product: ${name}`,\n    `Category: ${cat}`,\n    `Available sizes: ${size}`,\n    `Available colors: ${color}`,\n    `Price (BDT): ${price}`,\n    `Stock: ${stock}`,\n    `Status: ${status}`,\n    `Description: ${desc}`,\n    `Size guide: ${name} comes in sizes ${size}. Customer should pick the closest size.`,\n    `FAQ: ${name} er dam ${price} taka. Stock ${stock} ti ache. Color: ${color}.`,\n    `Objection handling: Quality bhalo, ${desc}. Confirm korar pore COD e pathano hoy.`\n  ];\n  const content = lines.join('\\n');\n  out.push({ json: {\n     content,\n     metadata: {\n       product_id: p.product_id,\n       name, category: cat, price, status,\n       source: 'products_sheet'\n     }\n  }});\n}\nreturn out;\n"
+      },
+      "id": "74842498-76ff-42f8-9491-c316509df2a1",
+      "name": "Build Document",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "insert",
+        "pineconeIndex": {
+          "__rl": true,
+          "value": "fb-chatbot-kb",
+          "mode": "list",
+          "cachedResultName": "fb-chatbot-kb"
+        },
+        "options": {
+          "clearNamespace": false,
+          "pineconeNamespace": "products"
+        }
+      },
+      "id": "2cf6deea-b3de-4c90-b339-e4e4fb3cd7f8",
+      "name": "Pinecone Upsert",
+      "type": "@n8n/n8n-nodes-langchain.vectorStorePinecone",
+      "typeVersion": 1.1,
+      "position": [
+        1080,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "jsonMode": "expressionData",
+        "jsonData": "={{ $json.content }}",
+        "options": {
+          "metadata": {
+            "metadataValues": [
+              {
+                "name": "product_id",
+                "value": "={{ $json.metadata.product_id }}"
+              },
+              {
+                "name": "name",
+                "value": "={{ $json.metadata.name }}"
+              },
+              {
+                "name": "category",
+                "value": "={{ $json.metadata.category }}"
+              },
+              {
+                "name": "source",
+                "value": "={{ $json.metadata.source }}"
+              }
+            ]
+          }
+        }
+      },
+      "id": "3bbc0ab9-d92c-4afb-8ea0-7e23c1686505",
+      "name": "Document Loader",
+      "type": "@n8n/n8n-nodes-langchain.documentDefaultDataLoader",
+      "typeVersion": 1.1,
+      "position": [
+        1080,
+        540
+      ]
+    },
+    {
+      "parameters": {
+        "chunkSize": 600,
+        "chunkOverlap": 60,
+        "options": {}
+      },
+      "id": "4800828e-4823-45a2-8522-2afa8f602ce9",
+      "name": "Text Splitter",
+      "type": "@n8n/n8n-nodes-langchain.textSplitterRecursiveCharacterTextSplitter",
+      "typeVersion": 1,
+      "position": [
+        1080,
+        760
+      ]
+    },
+    {
+      "parameters": {
+        "model": "text-embedding-3-small",
+        "options": {}
+      },
+      "id": "7e653133-4086-48f9-afce-b528ca79d624",
+      "name": "OpenAI Embeddings",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        800,
+        540
+      ]
+    }
+  ],
+  "connections": {
+    "Run Manually": {
+      "main": [
+        [
+          {
+            "node": "Get Products",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Daily Schedule": {
+      "main": [
+        [
+          {
+            "node": "Get Products",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Products": {
+      "main": [
+        [
+          {
+            "node": "Only Active",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Only Active": {
+      "main": [
+        [
+          {
+            "node": "Build Document",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Build Document": {
+      "main": [
+        [
+          {
+            "node": "Pinecone Upsert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Document Loader": {
+      "ai_document": [
+        [
+          {
+            "node": "Pinecone Upsert",
+            "type": "ai_document",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Text Splitter": {
+      "ai_textSplitter": [
+        [
+          {
+            "node": "Document Loader",
+            "type": "ai_textSplitter",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Embeddings": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Pinecone Upsert",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [],
+  "pinData": {},
+  "meta": {
+    "templateCreatedAt": "2026-05-28"
+  }
+}

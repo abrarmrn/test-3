@@ -1,0 +1,1063 @@
+{
+  "name": "02 \u2014 FB Messenger Chatbot (RAG + Order Flow)",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Workflow 2 \u2014 FB Messenger Chatbot\n\n**Flow:** Webhook \u2192 Extract \u2192 (audio? STT) \u2192 Get User \u2192 Detect Intent (Code/IF) \u2192 Switch:\n\u2022 Order intents \u2192 Order Flow Code (collects product/size/address/phone/confirm) \u2192 Append to Orders sheet\n\u2022 QA intent \u2192 Pinecone retrieve \u2192 OpenAI Chat (short Banglish)\n\u2192 Update User memory \u2192 Send Messenger reply.\n\n**Setup:** Replace `REPLACE_GOOGLE_SHEET_ID`, set FB Page Token in Send FB Reply, connect Google Sheets / OpenAI / Pinecone credentials. Webhook path: /fb-messenger-rag.",
+        "height": 300,
+        "width": 460
+      },
+      "id": "459d616d-7be8-4aee-a920-5a143dd084ca",
+      "name": "README",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        0,
+        -260
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "fb-messenger-rag",
+        "responseMode": "onReceived",
+        "responseData": "EVENT_RECEIVED",
+        "options": {}
+      },
+      "id": "dc5d5b6b-779a-459d-842b-c99cb6e3d77c",
+      "name": "FB Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "psid",
+              "type": "string",
+              "value": "={{ $json.body.entry[0].messaging[0].sender.id }}"
+            },
+            {
+              "id": "a2",
+              "name": "text",
+              "type": "string",
+              "value": "={{ $json.body.entry[0].messaging[0].message.text || '' }}"
+            },
+            {
+              "id": "a3",
+              "name": "attachment_type",
+              "type": "string",
+              "value": "={{ ($json.body.entry[0].messaging[0].message.attachments && $json.body.entry[0].messaging[0].message.attachments[0] && $json.body.entry[0].messaging[0].message.attachments[0].type) || '' }}"
+            },
+            {
+              "id": "a4",
+              "name": "attachment_url",
+              "type": "string",
+              "value": "={{ ($json.body.entry[0].messaging[0].message.attachments && $json.body.entry[0].messaging[0].message.attachments[0] && $json.body.entry[0].messaging[0].message.attachments[0].payload && $json.body.entry[0].messaging[0].message.attachments[0].payload.url) || '' }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "260f745a-295b-4bd5-8ac5-9fd5152c2f63",
+      "name": "Extract Message",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        240,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.attachment_type }}",
+              "rightValue": "audio",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "27ed6bc9-b264-4ada-a5ad-bdbe052be5d9",
+      "name": "Is Audio?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        480,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.attachment_url }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "788cde78-35e5-4667-aede-184d2e3f81c2",
+      "name": "Download Audio",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        720,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "audio",
+        "operation": "transcribe",
+        "binaryPropertyName": "data",
+        "options": {}
+      },
+      "id": "9bc53df4-dd87-4cf9-85d0-6159e28568d1",
+      "name": "Transcribe Audio",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [
+        960,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "b1",
+              "name": "psid",
+              "type": "string",
+              "value": "={{ $('Extract Message').item.json.psid }}"
+            },
+            {
+              "id": "b2",
+              "name": "text",
+              "type": "string",
+              "value": "={{ $json.text }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a621b61c-ba7d-4f8f-b4f6-65e064b53327",
+      "name": "Use Transcript",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1200,
+        -120
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c1",
+              "name": "psid",
+              "type": "string",
+              "value": "={{ $json.psid }}"
+            },
+            {
+              "id": "c2",
+              "name": "text",
+              "type": "string",
+              "value": "={{ $json.text }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "c0aeb961-443f-4a97-915d-865089af7258",
+      "name": "Use Text",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        720,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "append"
+      },
+      "id": "8be18bf1-e62f-4366-bee8-1c541568bdaa",
+      "name": "Merge Message",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        1440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Users",
+          "mode": "name"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "psid",
+              "lookupValue": "={{ $json.psid }}"
+            }
+          ]
+        },
+        "options": {
+          "returnAllMatches": false,
+          "headerRow": 4,
+          "dataStartRow": 5
+        }
+      },
+      "id": "17a98b15-a13f-497f-bf1c-c625cc53ba3c",
+      "name": "Get User",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1680,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Products",
+          "mode": "name"
+        },
+        "options": {
+          "returnAllMatches": true,
+          "headerRow": 4,
+          "dataStartRow": 5
+        }
+      },
+      "id": "07281591-b151-418b-a7b0-f66f837e5781",
+      "name": "Get Products",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1680,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "x1",
+              "name": "psid",
+              "type": "string",
+              "value": "={{ $('Merge Message').item.json.psid }}"
+            },
+            {
+              "id": "x2",
+              "name": "text",
+              "type": "string",
+              "value": "={{ $('Merge Message').item.json.text }}"
+            },
+            {
+              "id": "x3",
+              "name": "user_name",
+              "type": "string",
+              "value": "={{ $('Get User').item.json.name || '' }}"
+            },
+            {
+              "id": "x4",
+              "name": "ai_enabled",
+              "type": "boolean",
+              "value": "={{ $('Get User').item.json.ai_enabled === false ? false : true }}"
+            },
+            {
+              "id": "x5",
+              "name": "memory_raw",
+              "type": "string",
+              "value": "={{ $('Get User').item.json.memory || '' }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "dfca745b-c1c3-4e1a-b2d0-bbe7b6eb0d9e",
+      "name": "Build Context",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1920,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Intent detection: state machine + keyword match. No LLM, no RAG.\nconst j = $input.first().json;\nconst text = (j.text || '').trim();\nconst lower = text.toLowerCase();\n// Parse memory JSON safely\nlet memory = { turns: [], order: null, flow_state: null };\ntry { if (j.memory_raw) memory = JSON.parse(j.memory_raw); } catch(e){}\nif (!Array.isArray(memory.turns)) memory.turns = [];\nif (!memory.order) memory.order = null;\nconst flow = memory.flow_state || null;\nconst has = (kws) => kws.some(k => lower.includes(k));\n// Cancel anywhere\nif (has(['cancel order','order cancel','baatil','batil korbo'])) {\n  return [{ json: { ...j, intent: 'order_cancel', memory } }];\n}\n// Continue active order flow\nif (flow === 'await_product')  return [{ json: { ...j, intent: 'order_product', memory } }];\nif (flow === 'await_size')     return [{ json: { ...j, intent: 'order_size',    memory } }];\nif (flow === 'await_quantity') return [{ json: { ...j, intent: 'order_quantity',memory } }];\nif (flow === 'await_address')  return [{ json: { ...j, intent: 'order_address', memory } }];\nif (flow === 'await_phone')    return [{ json: { ...j, intent: 'order_phone',   memory } }];\nif (flow === 'await_confirm')  return [{ json: { ...j, intent: 'order_confirm', memory } }];\n// Order start keywords (Bangla / Banglish)\nconst orderKw = ['order korbo','order korte chai','kinbo','kinte chai',\n  'nibo','nite chai','place order','order','kine nibo','kinte chai'];\nif (has(orderKw)) return [{ json: { ...j, intent: 'order_start', memory } }];\n// Default \u2192 RAG QA\nreturn [{ json: { ...j, intent: 'qa', memory } }];\n"
+      },
+      "id": "c63c6e84-4ef6-4c8e-8895-923ac339410c",
+      "name": "Detect Intent",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2160,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "r1",
+                    "leftValue": "={{ $json.intent }}",
+                    "rightValue": "qa",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "qa"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "loose",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "r2",
+                    "leftValue": "={{ $json.intent }}",
+                    "rightValue": "order_",
+                    "operator": {
+                      "type": "string",
+                      "operation": "startsWith",
+                      "name": "filter.operator.startsWith"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "order"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "id": "abd233e8-40c3-48fd-b0b1-a86f7ba7f0c2",
+      "name": "Route Intent",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        2400,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Deterministic order flow \u2014 no LLM, no RAG.\nconst j = $input.first().json;\nconst intent = j.intent;\nconst text = (j.text || '').trim();\nconst lower = text.toLowerCase();\nconst psid = j.psid;\nconst userName = j.user_name || '';\nconst memory = j.memory || { turns: [], order: null, flow_state: null };\nlet order = memory.order || { product:'', size:'', quantity:1, price:0,\n  address:'', phone:'', status:'pending', note:'' };\nlet flow = memory.flow_state || null;\nlet reply = '';\nlet saveOrder = false;\n// Load product catalog from Get Products node\nlet products = [];\ntry { products = $('Get Products').all().map(x=>x.json)\n        .filter(p => (p.status||'').toLowerCase()==='active'); } catch(e){}\nconst findProduct = (q) => {\n  const ql = (q||'').toLowerCase();\n  return products.find(p => ql.includes((p.name||'').toLowerCase())\n                          || ql.includes((p.category||'').toLowerCase()));\n};\nconst isYes = /(han|haa|hae|jee|yes|ok|okay|confirm|achaa|theek|thik)/i;\nconst isNo  = /(na|no|cancel|baatil|batil)/i;\nif (intent === 'order_cancel') {\n  reply = 'Theek ache, order baatil korlam.';\n  flow = null; order = null;\n} else if (intent === 'order_start') {\n  const found = findProduct(text);\n  if (found) {\n    order.product = found.name;\n    order.price = Number(found.price) || 0;\n    flow = 'await_size';\n    reply = `${found.name} pochonder! Size ki lagbe? (${found.size})`;\n  } else {\n    flow = 'await_product';\n    const list = products.map(p=>p.name).join(', ') || 'product list';\n    reply = `Konta nibe? Available: ${list}`;\n  }\n} else if (intent === 'order_product') {\n  const found = findProduct(text);\n  if (found) {\n    order.product = found.name;\n    order.price = Number(found.price) || 0;\n    flow = 'await_size';\n    reply = `Beche nilam: ${found.name}. Size ki? (${found.size})`;\n  } else {\n    reply = 'Sorry, oi product nei. Onno ekta name din please.';\n  }\n} else if (intent === 'order_size') {\n  order.size = text.toUpperCase().slice(0,10);\n  flow = 'await_quantity';\n  reply = 'Koto ti lagbe? (e.g. 1)';\n} else if (intent === 'order_quantity') {\n  const q = parseInt((text.match(/\\d+/)||['1'])[0],10);\n  order.quantity = q > 0 ? q : 1;\n  flow = 'await_address';\n  reply = 'Apnar full address ta diben please?';\n} else if (intent === 'order_address') {\n  if (text.length < 5) {\n    reply = 'Address ta detail kore likhben please.';\n  } else {\n    order.address = text;\n    flow = 'await_phone';\n    reply = 'Address peyechi. Phone number ta diben?';\n  }\n} else if (intent === 'order_phone') {\n  const digits = text.replace(/\\D/g,'');\n  if (digits.length < 10) {\n    reply = 'Phone number sothik moto diben (11 digit).';\n  } else {\n    order.phone = digits.slice(0,15);\n    flow = 'await_confirm';\n    const total = (order.price||0) * (order.quantity||1);\n    reply = `Confirm? ${order.product} | ${order.size} | qty ${order.quantity}`+\n            ` | total ${total} BDT | ${order.phone}. (han / na)`;\n  }\n} else if (intent === 'order_confirm') {\n  if (isYes.test(lower)) {\n    order.status = 'pending';\n    saveOrder = true;\n    flow = null;\n    reply = 'Order confirm hoyeche. Shigree call korbo. Dhonnobad!';\n  } else if (isNo.test(lower)) {\n    flow = null; order = null;\n    reply = 'Theek ache, order baatil korlam.';\n  } else {\n    reply = 'Confirm korte han / na likhun.';\n  }\n}\n// Save back to memory\nmemory.flow_state = flow;\nmemory.order = saveOrder ? null : order;\n// Append turn (cap last 5)\nmemory.turns.push({ role:'user', content: text });\nmemory.turns.push({ role:'assistant', content: reply });\nmemory.turns = memory.turns.slice(-10);\nreturn [{ json: {\n  psid, user_name: userName, text, reply,\n  save_order: saveOrder,\n  order: order || {},\n  memory_json: JSON.stringify(memory)\n}}];\n"
+      },
+      "id": "53f85730-90d2-43f1-a108-366ebeb2ce5d",
+      "name": "Order Flow",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2640,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "s1",
+              "leftValue": "={{ $json.save_order }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true,
+                "name": "filter.operator.true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "21c0ffc6-0da3-40b1-83be-8beae0789f91",
+      "name": "Save Order?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2880,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Orders",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "order_id": "=ORD-{{ $json.psid }}-{{ $now.toMillis() }}",
+            "psid": "={{ $json.psid }}",
+            "customer_name": "={{ $json.user_name }}",
+            "product": "={{ $json.order.product }}",
+            "size": "={{ $json.order.size }}",
+            "quantity": "={{ $json.order.quantity }}",
+            "price": "={{ ($json.order.price || 0) * ($json.order.quantity || 1) }}",
+            "address": "={{ $json.order.address }}",
+            "phone": "={{ $json.order.phone }}",
+            "status": "pending",
+            "note": "Placed via Messenger bot",
+            "created_at": "={{ $now.toISO() }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "order_id",
+              "displayName": "order_id",
+              "type": "string"
+            },
+            {
+              "id": "psid",
+              "displayName": "psid",
+              "type": "string"
+            },
+            {
+              "id": "customer_name",
+              "displayName": "customer_name",
+              "type": "string"
+            },
+            {
+              "id": "product",
+              "displayName": "product",
+              "type": "string"
+            },
+            {
+              "id": "size",
+              "displayName": "size",
+              "type": "string"
+            },
+            {
+              "id": "quantity",
+              "displayName": "quantity",
+              "type": "number"
+            },
+            {
+              "id": "price",
+              "displayName": "price",
+              "type": "number"
+            },
+            {
+              "id": "address",
+              "displayName": "address",
+              "type": "string"
+            },
+            {
+              "id": "phone",
+              "displayName": "phone",
+              "type": "string"
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "type": "string"
+            },
+            {
+              "id": "note",
+              "displayName": "note",
+              "type": "string"
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {
+          "headerRow": 4
+        }
+      },
+      "id": "22bac48c-2ab2-4c7d-aab1-59e5e35fc32d",
+      "name": "Append Order",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        3120,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "load",
+        "prompt": "={{ $json.text }}",
+        "topK": 4,
+        "pineconeIndex": {
+          "__rl": true,
+          "value": "fb-chatbot-kb",
+          "mode": "list",
+          "cachedResultName": "fb-chatbot-kb"
+        },
+        "options": {
+          "pineconeNamespace": "products"
+        }
+      },
+      "id": "6578e071-49f5-421c-a32f-c38f6d0d1f7b",
+      "name": "Pinecone Retrieve",
+      "type": "@n8n/n8n-nodes-langchain.vectorStorePinecone",
+      "typeVersion": 1.1,
+      "position": [
+        2640,
+        -200
+      ]
+    },
+    {
+      "parameters": {
+        "model": "text-embedding-3-small",
+        "options": {}
+      },
+      "id": "0c8d1a18-f0cc-447d-a936-432a4708f44c",
+      "name": "OpenAI Embeddings (QA)",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        2640,
+        -380
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Combine top-K Pinecone matches into a single context string.\nconst docs = $input.all().map(it => it.json);\nconst ctx = docs.map((d,i) => {\n  const c = d.pageContent || d.document?.pageContent || d.content || '';\n  return `[${i+1}] ${c}`;\n}).join('\\n---\\n');\n// Pull psid + question from upstream\nconst up = $('Detect Intent').item.json;\nreturn [{ json: {\n  psid: up.psid,\n  user_name: up.user_name || '',\n  text: up.text,\n  question: up.text,\n  context: ctx || 'No catalog context available.',\n  memory: up.memory\n}}];\n"
+      },
+      "id": "b883640b-a31c-44bc-a9f8-981b8994ad55",
+      "name": "Build RAG Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2880,
+        -200
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "operation": "message",
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4o-mini",
+          "mode": "list",
+          "cachedResultName": "gpt-4o-mini"
+        },
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "Tumi ekta Bangladeshi e-commerce shop er Messenger assistant. Reply STYLE: Banglish (Bangla in English letters), max 1-2 short sentences, polite, structured. Customer pure Bangla likhle pure Bangla te reply koro. ONLY use the CATALOG CONTEXT below \u2014 kono price, size, stock invent korbe na. Jodi context e na thake, bolbe: 'Ei muhurte ami sure noi, ekto pore confirm kore janabo.'"
+            },
+            {
+              "role": "user",
+              "content": "CATALOG CONTEXT:\n{{ $json.context }}\n\nCUSTOMER QUESTION:\n{{ $json.question }}\n\nReply now (1-2 short sentences):"
+            }
+          ]
+        },
+        "simplify": true,
+        "options": {
+          "temperature": 0.3,
+          "maxTokens": 160
+        }
+      },
+      "id": "2e53d445-8531-443e-85b2-25beda430872",
+      "name": "Answer (OpenAI)",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.8,
+      "position": [
+        3120,
+        -200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Pull AI response and prepare the standard reply payload.\nconst j = $input.first().json;\n// OpenAI node (simplify=true) returns { message: { content }} or { content }\nlet reply = '';\nif (typeof j.message === 'object' && j.message?.content) reply = j.message.content;\nelse if (j.content) reply = j.content;\nelse if (j.text)   reply = j.text;\nelse if (j.output) reply = j.output;\nelse reply = 'Sorry, ekhon answer dite parchi na. Ektu pore try korben?';\nreply = String(reply).trim();\nconst ctxItem = $('Build RAG Context').item.json;\nconst memory = ctxItem.memory || { turns: [], order: null, flow_state: null };\nmemory.turns = (memory.turns || []);\nmemory.turns.push({ role:'user', content: ctxItem.text });\nmemory.turns.push({ role:'assistant', content: reply });\nmemory.turns = memory.turns.slice(-10);\nreturn [{ json: {\n  psid: ctxItem.psid,\n  user_name: ctxItem.user_name,\n  text: ctxItem.text,\n  reply,\n  memory_json: JSON.stringify(memory)\n}}];\n"
+      },
+      "id": "18d917b8-5e4f-4d45-928f-c87c6124d0d0",
+      "name": "Format QA Reply",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3360,
+        -200
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "append"
+      },
+      "id": "210a3530-9453-4f5c-a1d0-e6175e3790f5",
+      "name": "Merge Reply",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        3600,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Users",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "psid": "={{ $json.psid }}",
+            "name": "={{ $json.user_name || '' }}",
+            "last_user_msg": "={{ $json.text }}",
+            "last_bot_msg": "={{ $json.reply }}",
+            "last_message_at": "={{ $now.toISO() }}",
+            "memory": "={{ $json.memory_json }}"
+          },
+          "matchingColumns": [
+            "psid"
+          ],
+          "schema": [
+            {
+              "id": "psid",
+              "displayName": "psid",
+              "type": "string"
+            },
+            {
+              "id": "name",
+              "displayName": "name",
+              "type": "string"
+            },
+            {
+              "id": "last_user_msg",
+              "displayName": "last_user_msg",
+              "type": "string"
+            },
+            {
+              "id": "last_bot_msg",
+              "displayName": "last_bot_msg",
+              "type": "string"
+            },
+            {
+              "id": "last_message_at",
+              "displayName": "last_message_at",
+              "type": "string"
+            },
+            {
+              "id": "memory",
+              "displayName": "memory",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {
+          "headerRow": 4,
+          "dataStartRow": 5
+        }
+      },
+      "id": "bc0e355b-28cd-4c71-a19b-bfbf38485929",
+      "name": "Update User",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        3840,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.facebook.com/v19.0/me/messages",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "access_token",
+              "value": "REPLACE_FB_PAGE_ACCESS_TOKEN"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"recipient\": { \"id\": \"{{ $json.psid }}\" },\n  \"messaging_type\": \"RESPONSE\",\n  \"message\": { \"text\": \"{{ ($json.reply || '').replace(/\\\"/g,'\\\\\"').slice(0,1900) }}\" }\n}",
+        "options": {}
+      },
+      "id": "fcdcc857-d1cd-4305-b3a0-bb9549d41bc7",
+      "name": "Send FB Reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4080,
+        0
+      ]
+    }
+  ],
+  "connections": {
+    "FB Webhook": {
+      "main": [
+        [
+          {
+            "node": "Extract Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Message": {
+      "main": [
+        [
+          {
+            "node": "Is Audio?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Audio?": {
+      "main": [
+        [
+          {
+            "node": "Download Audio",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Use Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Audio": {
+      "main": [
+        [
+          {
+            "node": "Transcribe Audio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transcribe Audio": {
+      "main": [
+        [
+          {
+            "node": "Use Transcript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Use Transcript": {
+      "main": [
+        [
+          {
+            "node": "Merge Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Use Text": {
+      "main": [
+        [
+          {
+            "node": "Merge Message",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge Message": {
+      "main": [
+        [
+          {
+            "node": "Get User",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get User": {
+      "main": [
+        [
+          {
+            "node": "Get Products",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Products": {
+      "main": [
+        [
+          {
+            "node": "Build Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Context": {
+      "main": [
+        [
+          {
+            "node": "Detect Intent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Detect Intent": {
+      "main": [
+        [
+          {
+            "node": "Route Intent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route Intent": {
+      "main": [
+        [
+          {
+            "node": "Pinecone Retrieve",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Order Flow",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Order Flow": {
+      "main": [
+        [
+          {
+            "node": "Save Order?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Order?": {
+      "main": [
+        [
+          {
+            "node": "Append Order",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Merge Reply",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Append Order": {
+      "main": [
+        [
+          {
+            "node": "Merge Reply",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Pinecone Retrieve": {
+      "main": [
+        [
+          {
+            "node": "Build RAG Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Embeddings (QA)": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Pinecone Retrieve",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build RAG Context": {
+      "main": [
+        [
+          {
+            "node": "Answer (OpenAI)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Answer (OpenAI)": {
+      "main": [
+        [
+          {
+            "node": "Format QA Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format QA Reply": {
+      "main": [
+        [
+          {
+            "node": "Merge Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge Reply": {
+      "main": [
+        [
+          {
+            "node": "Update User",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update User": {
+      "main": [
+        [
+          {
+            "node": "Send FB Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [],
+  "pinData": {},
+  "meta": {
+    "templateCreatedAt": "2026-05-28"
+  }
+}
