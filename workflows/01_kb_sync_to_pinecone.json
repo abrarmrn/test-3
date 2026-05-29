@@ -1,0 +1,589 @@
+{
+  "name": "01 \u2014 KB Sync (5 Knowledge Tabs \u2192 Pinecone RAG)",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## Workflow 1 v2 \u2014 KB Sync (5 knowledge tabs \u2192 Pinecone)\n\n**Reads in parallel from triggers (no chained reads):**\nProducts, FAQ, Size_Guide, Sales_Objections, Setup.\n\n**Skipped (NOT in RAG):** Users, Orders, Leads, Customers, Support_Tickets, Lists.\n\n**Pinecone:** index `fb-chatbot-kb`, namespace `knowledge`. `clearNamespace` is true so each sync replaces all old vectors. Stable IDs are stored in metadata.id for traceability.\n\n**Setup:** Replace `REPLACE_GOOGLE_SHEET_ID`. Each Sheets node has `continueOnFail` on \u2014 missing sheets won't kill the sync. Sheets headers default to row 1 / data row 2 except `Products` and `Setup` which use header row 4 / data row 5 to match the pre-existing layout.",
+        "height": 320,
+        "width": 460
+      },
+      "id": "efdda7f7-bd2a-4077-a5b1-884fd5a6d80f",
+      "name": "README",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -560,
+        0
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "9976480d-0e1f-448c-8758-2c2c0a6dd137",
+      "name": "Run Manually",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -80,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 3 * * *"
+            }
+          ]
+        }
+      },
+      "id": "8ffa7191-e859-42c8-844b-8ff3f97a7fb6",
+      "name": "Daily Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -80,
+        600
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Products",
+          "mode": "name"
+        },
+        "options": {
+          "returnAllMatches": true,
+          "headerRow": 4,
+          "dataStartRow": 5
+        }
+      },
+      "id": "5c678845-14b1-4b11-8c3a-04fb1d1e773e",
+      "name": "Get Products",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        240,
+        0
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build Product Documents (one per active product row)\nconst items = $input.all();\nconst out = [];\nfor (const it of items) {\n  const p = it.json;\n  const status = (p.status || '').toString().trim().toLowerCase();\n  if (status && status !== 'active') continue;\n  const name = (p.name || '').toString().trim();\n  if (!name) continue;\n  const id = (p.product_id || `prd-${out.length+1}`).toString().trim();\n  const lines = [\n    `Type: product`,\n    `Product: ${name}`,\n    `Category: ${p.category || ''}`,\n    `Available sizes: ${p.size || ''}`,\n    `Available colors: ${p.color || ''}`,\n    `Price (BDT): ${p.price ?? ''}`,\n    `Stock: ${p.stock ?? ''}`,\n    `Description: ${p.description || ''}`,\n  ].filter(l => (l.split(': ')[1] || '').toString().trim() !== '');\n  out.push({ json: {\n    content: lines.join('\\n'),\n    metadata: {\n      id: `product-${id}`,\n      source: 'products_sheet',\n      type: 'product',\n      product_id: id,\n      name: name,\n      category: (p.category || '').toString()\n    }\n  }});\n}\nreturn out;\n"
+      },
+      "id": "76b59304-4d66-4b88-ba18-1f3361ef350b",
+      "name": "Build Products Documents",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        540,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "FAQ",
+          "mode": "name"
+        },
+        "options": {
+          "returnAllMatches": true,
+          "headerRow": 1,
+          "dataStartRow": 2
+        }
+      },
+      "id": "c85b02a1-1ba4-473e-8549-2fa8b0e20f13",
+      "name": "Get FAQ",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        240,
+        200
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build FAQ Documents\nconst items = $input.all();\nconst out = [];\nfor (const it of items) {\n  const f = it.json;\n  const q = (f.question || '').toString().trim();\n  const a = (f.answer || '').toString().trim();\n  if (!q || !a) continue;\n  const status = (f.status || '').toString().trim().toLowerCase();\n  if (status && status !== 'active') continue;\n  const id = (f.faq_id || f.id || `faq-${out.length+1}`).toString().trim();\n  const cat = (f.category || '').toString().trim();\n  const lines = [\n    `Type: faq`,\n    cat ? `Category: ${cat}` : '',\n    `Question: ${q}`,\n    `Answer: ${a}`,\n  ].filter(Boolean);\n  out.push({ json: {\n    content: lines.join('\\n'),\n    metadata: {\n      id: `faq-${id}`,\n      source: 'faq_sheet',\n      type: 'faq',\n      faq_id: id,\n      category: cat\n    }\n  }});\n}\nreturn out;\n"
+      },
+      "id": "394dd1a3-3038-4eee-921c-a0e6457316df",
+      "name": "Build FAQ Documents",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        540,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Size_Guide",
+          "mode": "name"
+        },
+        "options": {
+          "returnAllMatches": true,
+          "headerRow": 1,
+          "dataStartRow": 2
+        }
+      },
+      "id": "a9da678a-0073-4345-9ac9-67c1dfc5de4e",
+      "name": "Get Size",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        240,
+        400
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build Size_Guide Documents\nconst items = $input.all();\nconst out = [];\nconst META_KEYS = new Set(['size_id','id','category','product_category',\n  'size','status','notes','created_at','updated_at']);\nfor (const it of items) {\n  const s = it.json;\n  const cat = (s.category || s.product_category || '').toString().trim();\n  const size = (s.size || '').toString().trim();\n  if (!cat && !size) continue;\n  const status = (s.status || '').toString().trim().toLowerCase();\n  if (status && status !== 'active') continue;\n  const sid = (s.size_id || s.id || `${cat||'na'}-${size||out.length+1}`).toString().trim();\n  // Pull any measurement-like fields\n  const measures = Object.keys(s)\n    .filter(k => !META_KEYS.has(k))\n    .map(k => {\n      const v = s[k];\n      if (v === null || v === undefined || v === '') return '';\n      return `${k}: ${v}`;\n    })\n    .filter(Boolean)\n    .join(', ');\n  const notes = (s.notes || '').toString().trim();\n  const lines = [\n    `Type: size_guide`,\n    cat ? `Category: ${cat}` : '',\n    size ? `Size: ${size}` : '',\n    measures ? `Measurements: ${measures}` : '',\n    notes ? `Notes: ${notes}` : '',\n  ].filter(Boolean);\n  out.push({ json: {\n    content: lines.join('\\n'),\n    metadata: {\n      id: `size-${sid}`,\n      source: 'size_guide_sheet',\n      type: 'size_guide',\n      size_id: sid,\n      category: cat,\n      size: size\n    }\n  }});\n}\nreturn out;\n"
+      },
+      "id": "388f1f47-eaa3-4b1e-a73b-52fb9ada15ec",
+      "name": "Build Size Documents",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        540,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Sales_Objections",
+          "mode": "name"
+        },
+        "options": {
+          "returnAllMatches": true,
+          "headerRow": 1,
+          "dataStartRow": 2
+        }
+      },
+      "id": "fb7c8521-00a5-4cd8-93d1-9ea3c309b947",
+      "name": "Get Objections",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        240,
+        600
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build Sales_Objection Documents\nconst items = $input.all();\nconst out = [];\nfor (const it of items) {\n  const o = it.json;\n  const obj  = (o.objection || o.question || '').toString().trim();\n  const resp = (o.response || o.answer || o.reply || '').toString().trim();\n  if (!obj || !resp) continue;\n  const status = (o.status || '').toString().trim().toLowerCase();\n  if (status && status !== 'active') continue;\n  const id  = (o.objection_id || o.id || `obj-${out.length+1}`).toString().trim();\n  const cat = (o.category || '').toString().trim();\n  const lines = [\n    `Type: objection`,\n    cat ? `Category: ${cat}` : '',\n    `Objection: ${obj}`,\n    `Response: ${resp}`,\n  ].filter(Boolean);\n  out.push({ json: {\n    content: lines.join('\\n'),\n    metadata: {\n      id: `objection-${id}`,\n      source: 'sales_objections_sheet',\n      type: 'objection',\n      objection_id: id,\n      category: cat\n    }\n  }});\n}\nreturn out;\n"
+      },
+      "id": "32c901c8-b16b-485c-8e8c-5b1cbc88ad58",
+      "name": "Build Objections Documents",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        540,
+        600
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_GOOGLE_SHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Setup",
+          "mode": "name"
+        },
+        "options": {
+          "returnAllMatches": true,
+          "headerRow": 4,
+          "dataStartRow": 5
+        }
+      },
+      "id": "77fa1f5e-e33c-4490-9166-6b72543e76d4",
+      "name": "Get Instructions",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        240,
+        800
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build Instruction Documents (from Setup / Instructions sheet)\n// SECURITY: skip secrets/tokens \u2014 only operational rules go to RAG.\nconst items = $input.all();\nconst out = [];\nconst SECRET_RX = /(token|secret|password|api[_ ]?key|sheet[_ ]?id|chat[_ ]?id)/i;\nconst ALLOW_RX  = /(reply|style|memory|max|tone|language|hour|policy|rule|instruction|behavior|prompt)/i;\nfor (const it of items) {\n  const s = it.json;\n  const key = (s.key || '').toString().trim();\n  const val = (s.value || '').toString().trim();\n  if (!key || !val) continue;\n  // Block secrets unless explicitly allow-listed\n  if (SECRET_RX.test(key) && !ALLOW_RX.test(key)) continue;\n  const notes = (s.notes || '').toString().trim();\n  const stableId = key.toLowerCase().replace(/[^a-z0-9]+/g,'_');\n  const lines = [\n    `Type: instruction`,\n    `Setting: ${key}`,\n    `Value: ${val}`,\n    notes ? `Notes: ${notes}` : '',\n  ].filter(Boolean);\n  out.push({ json: {\n    content: lines.join('\\n'),\n    metadata: {\n      id: `instruction-${stableId}`,\n      source: 'setup_sheet',\n      type: 'instruction',\n      key: key\n    }\n  }});\n}\nreturn out;\n"
+      },
+      "id": "34e3c328-f1a8-4763-b822-e8aea188d3e2",
+      "name": "Build Instructions Documents",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        540,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "append",
+        "numberInputs": 5
+      },
+      "id": "98f792e1-b03d-4c18-a6a5-636823642414",
+      "name": "Merge All Documents",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        880,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "insert",
+        "pineconeIndex": {
+          "__rl": true,
+          "value": "fb-chatbot-kb",
+          "mode": "list",
+          "cachedResultName": "fb-chatbot-kb"
+        },
+        "options": {
+          "clearNamespace": true,
+          "pineconeNamespace": "knowledge"
+        }
+      },
+      "id": "d76f5472-9544-4df0-b47c-b97f2d1711f1",
+      "name": "Pinecone Upsert",
+      "type": "@n8n/n8n-nodes-langchain.vectorStorePinecone",
+      "typeVersion": 1.1,
+      "position": [
+        1180,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "jsonMode": "expressionData",
+        "jsonData": "={{ $json.content }}",
+        "options": {
+          "metadata": {
+            "metadataValues": [
+              {
+                "name": "id",
+                "value": "={{ $json.metadata.id }}"
+              },
+              {
+                "name": "source",
+                "value": "={{ $json.metadata.source }}"
+              },
+              {
+                "name": "type",
+                "value": "={{ $json.metadata.type }}"
+              },
+              {
+                "name": "name",
+                "value": "={{ $json.metadata.name || $json.metadata.key || $json.metadata.size || '' }}"
+              },
+              {
+                "name": "category",
+                "value": "={{ $json.metadata.category || '' }}"
+              }
+            ]
+          }
+        }
+      },
+      "id": "4192e495-0abf-4fe5-bec7-9e1ec457b227",
+      "name": "Document Loader",
+      "type": "@n8n/n8n-nodes-langchain.documentDefaultDataLoader",
+      "typeVersion": 1.1,
+      "position": [
+        1180,
+        620
+      ]
+    },
+    {
+      "parameters": {
+        "chunkSize": 600,
+        "chunkOverlap": 60,
+        "options": {}
+      },
+      "id": "5414e482-6be0-446f-8592-903a27db4345",
+      "name": "Text Splitter",
+      "type": "@n8n/n8n-nodes-langchain.textSplitterRecursiveCharacterTextSplitter",
+      "typeVersion": 1,
+      "position": [
+        1180,
+        840
+      ]
+    },
+    {
+      "parameters": {
+        "model": "text-embedding-3-small",
+        "options": {}
+      },
+      "id": "edd596c8-b3e2-459f-a03e-9442bf550c82",
+      "name": "OpenAI Embeddings",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        900,
+        620
+      ]
+    }
+  ],
+  "connections": {
+    "Run Manually": {
+      "main": [
+        [
+          {
+            "node": "Get Products",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get FAQ",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Size",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Objections",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Instructions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Daily Schedule": {
+      "main": [
+        [
+          {
+            "node": "Get Products",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get FAQ",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Size",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Objections",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Instructions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Products": {
+      "main": [
+        [
+          {
+            "node": "Build Products Documents",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Products Documents": {
+      "main": [
+        [
+          {
+            "node": "Merge All Documents",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get FAQ": {
+      "main": [
+        [
+          {
+            "node": "Build FAQ Documents",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build FAQ Documents": {
+      "main": [
+        [
+          {
+            "node": "Merge All Documents",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Get Size": {
+      "main": [
+        [
+          {
+            "node": "Build Size Documents",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Size Documents": {
+      "main": [
+        [
+          {
+            "node": "Merge All Documents",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Get Objections": {
+      "main": [
+        [
+          {
+            "node": "Build Objections Documents",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Objections Documents": {
+      "main": [
+        [
+          {
+            "node": "Merge All Documents",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    },
+    "Get Instructions": {
+      "main": [
+        [
+          {
+            "node": "Build Instructions Documents",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Instructions Documents": {
+      "main": [
+        [
+          {
+            "node": "Merge All Documents",
+            "type": "main",
+            "index": 4
+          }
+        ]
+      ]
+    },
+    "Merge All Documents": {
+      "main": [
+        [
+          {
+            "node": "Pinecone Upsert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Document Loader": {
+      "ai_document": [
+        [
+          {
+            "node": "Pinecone Upsert",
+            "type": "ai_document",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Text Splitter": {
+      "ai_textSplitter": [
+        [
+          {
+            "node": "Document Loader",
+            "type": "ai_textSplitter",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Embeddings": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Pinecone Upsert",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": [],
+  "pinData": {},
+  "meta": {
+    "templateCreatedAt": "2026-05-29"
+  }
+}
