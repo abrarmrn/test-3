@@ -572,7 +572,7 @@
           "cachedResultName": "fb-chatbot-kb"
         },
         "options": {
-          "pineconeNamespace": "products"
+          "pineconeNamespace": "knowledge"
         }
       },
       "id": "6578e071-49f5-421c-a32f-c38f6d0d1f7b",
