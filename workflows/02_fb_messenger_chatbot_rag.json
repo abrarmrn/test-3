@@ -578,7 +578,13 @@
       "position": [
         3120,
         -660
-      ]
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "id": "REPLACE_WITH_YOUR_GEMINI_CREDENTIAL_ID",
+          "name": "Google Gemini API (your AI Studio key)"
+        }
+      }
     },
     {
       "parameters": {
@@ -1015,6 +1021,36 @@
       "position": [
         4680,
         0
+      ]
+    },
+    {
+      "parameters": {
+        "model": "text-embedding-3-small",
+        "options": {}
+      },
+      "id": "18ca9866-6491-4280-8718-54f9b831cea0",
+      "name": "OpenAI Embeddings (QA fallback)",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        2840,
+        -600
+      ],
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "content": "### Gemini credential\n\n**Use 'My own credential'** with a Google AI Studio key. n8n Connect's Gemini pool does not include `gemini-embedding-001` and will 404.\n\nIf it still fails: enable `OpenAI Embeddings (QA fallback)`, wire its `ai_embedding` into `Pinecone Retrieve`, and recreate the Pinecone index at dim 1536. Apply the same swap in Workflow 1.\n\nRun Workflow 1 first \u2014 its **Validate Gemini Embeddings** step will surface credential issues clearly.",
+        "height": 280,
+        "width": 360
+      },
+      "id": "d76f5df9-d8e8-46a7-9ac2-4be315e6ee5a",
+      "name": "Gemini troubleshooting",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        2820,
+        -820
       ]
     }
   ],
