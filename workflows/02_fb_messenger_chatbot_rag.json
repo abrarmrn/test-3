@@ -586,13 +586,13 @@
     },
     {
       "parameters": {
-        "model": "text-embedding-3-small",
+        "modelName": "models/gemini-embedding-001",
         "options": {}
       },
       "id": "0c8d1a18-f0cc-447d-a936-432a4708f44c",
-      "name": "OpenAI Embeddings (QA)",
-      "type": "@n8n/n8n-nodes-langchain.embeddingsOpenAi",
-      "typeVersion": 1.2,
+      "name": "Gemini Embeddings (QA)",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsGoogleGemini",
+      "typeVersion": 1,
       "position": [
         2640,
         -380
@@ -984,17 +984,6 @@
         ]
       ]
     },
-    "OpenAI Embeddings (QA)": {
-      "ai_embedding": [
-        [
-          {
-            "node": "Pinecone Retrieve",
-            "type": "ai_embedding",
-            "index": 0
-          }
-        ]
-      ]
-    },
     "Build RAG Context": {
       "main": [
         [
@@ -1045,6 +1034,17 @@
           {
             "node": "Send FB Reply",
             "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini Embeddings (QA)": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Pinecone Retrieve",
+            "type": "ai_embedding",
             "index": 0
           }
         ]
