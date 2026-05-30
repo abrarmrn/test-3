@@ -1,29 +1,29 @@
 {
-  "name": "01 \u2014 KB Sync (Products + Setup \u2192 Pinecone, Gemini)",
+  "name": "01 \u2014 KB Sync (Products + Setup \u2192 Pinecone, Gemini + validation)",
   "nodes": [
     {
       "parameters": {
-        "content": "## Workflow 1 v3 \u2014 KB Sync (Products + Setup \u2192 Pinecone)\n\n**Reads only the tabs that exist:** Products, Setup.\n**Excluded (operational/private data):** Users, Orders, Leads.\n\n**Embeddings:** Google Gemini `gemini-embedding-001` (3072-dim).\n**Pinecone:** index `fb-chatbot-kb` (must be 3072-dim, cosine), namespace `knowledge`. `clearNamespace` is true so each sync fully replaces old vectors. Each doc carries a stable `metadata.id` (e.g. `product-PRD-001`, `setup-reply_style`).\n\n**Fan-out rule:** each Sheets read is wired DIRECTLY from the trigger output (not chained through the other sheet) so each runs exactly once per execution.\n\n**Setup before activating:**\n1. Replace `REPLACE_GOOGLE_SHEET_ID`.\n2. Connect credentials: Google Sheets OAuth2, Google Gemini (or PaLM) API, Pinecone.\n3. (Re)create Pinecone index `fb-chatbot-kb` at dim 3072 if you previously had a 1536-dim index.\n4. WF2's Pinecone Retrieve uses the same Gemini model so query and index embeddings match.",
-        "height": 380,
-        "width": 480
+        "content": "## Workflow 1 v4 \u2014 KB Sync with Gemini credential validation\n\n**Important \u2014 Gemini credential setup:**\n1. Go to https://aistudio.google.com/apikey and create an API key.\n2. In n8n: Credentials -> New -> 'Google Gemini (PaLM) API' -> select **'My own credential'** (NOT n8n Connect) -> paste key.\n3. Open the **Gemini Embeddings** and **Validate Gemini Embeddings** nodes in this workflow and bind that credential.\n\n**Pre-flight validation:** every run first calls Gemini's `embedContent` for `gemini-embedding-001` once. If the response is not a 3072-dim vector, **Stop and Error** halts the workflow before Pinecone is touched, so you'll see the failure clearly.\n\n**If Gemini still fails:**\n- Disable the `Gemini Embeddings` node.\n- Enable the `OpenAI Embeddings (fallback)` node.\n- Wire its `ai_embedding` output into `Pinecone Upsert`.\n- Recreate Pinecone index `fb-chatbot-kb` at dim **1536** (cosine).\n- Apply the same swap in Workflow 2.\n\n**Pinecone:** index `fb-chatbot-kb` (dim 3072 with Gemini, cosine), namespace `knowledge`, `clearNamespace=true`.\n**Tabs read:** Products, Setup. **Never read:** Users, Orders, Leads.",
+        "height": 480,
+        "width": 540
       },
-      "id": "0cb3a00a-0fe5-438e-a794-b41759403c04",
+      "id": "1de9dd3d-5bc1-422e-b3e6-8231bce2eab8",
       "name": "README",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
       "position": [
-        -560,
-        0
+        -700,
+        -100
       ]
     },
     {
       "parameters": {},
-      "id": "9bc252ad-6cf4-4526-ad83-1fcaa03e8a13",
+      "id": "e2cf8fef-b9c3-4887-851f-d06d3aaa25b0",
       "name": "Run Manually",
       "type": "n8n-nodes-base.manualTrigger",
       "typeVersion": 1,
       "position": [
-        -80,
+        -100,
         200
       ]
     },
@@ -38,13 +38,93 @@
           ]
         }
       },
-      "id": "6bab31cb-b0ce-4018-8a28-61ca9e2beaa6",
+      "id": "9f76801f-faa6-4af5-a641-322e1a3603d6",
       "name": "Daily Schedule",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
       "position": [
-        -80,
+        -100,
         500
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googlePalmApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"content\": { \"parts\": [{\"text\": \"n8n embedding self-test\"}] },\n  \"outputDimensionality\": 3072\n}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "2ff0ea88-2ba4-4a01-b47d-c1c0923be519",
+      "name": "Validate Gemini Embeddings",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        200,
+        350
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "id": "REPLACE_WITH_YOUR_GEMINI_CREDENTIAL_ID",
+          "name": "Google Gemini API (your AI Studio key)"
+        }
+      },
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "v1",
+              "leftValue": "={{ ($json.embedding && $json.embedding.values && $json.embedding.values.length) || 0 }}",
+              "rightValue": 3072,
+              "operator": {
+                "type": "number",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "02bd6944-ecfa-44c6-9992-cf023f3a2754",
+      "name": "Vector OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        480,
+        350
+      ]
+    },
+    {
+      "parameters": {
+        "errorMessage": "Gemini Embeddings validation failed: response did not contain a 3072-dim vector for `models/gemini-embedding-001`. Switch the Gemini Embeddings credential to 'My own credential' with a valid Google AI Studio key, or follow the README to fall back to OpenAI text-embedding-3-small (1536)."
+      },
+      "id": "870d835a-61fc-43aa-affa-51c29778e8d5",
+      "name": "Stop: Bad Embeddings",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        720,
+        540
       ]
     },
     {
@@ -65,27 +145,27 @@
           "dataStartRow": 5
         }
       },
-      "id": "9b1c36f9-f337-43b9-9268-f596ccf8d51c",
+      "id": "02c32469-c52f-4f4c-8e3d-44c05aec4e33",
       "name": "Get Products",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.5,
       "position": [
-        240,
-        80
+        760,
+        160
       ],
       "continueOnFail": true
     },
     {
       "parameters": {
-        "jsCode": "// Build Product Documents from Products sheet rows.\n// Columns: product_id, name, category, size, color, price, stock,\n//          description, image_url, status\nconst items = $input.all();\nconst out = [];\nfor (const it of items) {\n  const p = it.json;\n  const status = (p.status || '').toString().trim().toLowerCase();\n  if (status && status !== 'active') continue;          // skip inactive\n  const name = (p.name || '').toString().trim();\n  if (!name) continue;                                  // skip blank rows\n  const id = (p.product_id || `prd-${out.length+1}`).toString().trim();\n  const lines = [\n    `Type: Product`,\n    `Product ID: ${id}`,\n    `Name: ${name}`,\n    `Category: ${p.category || ''}`,\n    `Size: ${p.size || ''}`,\n    `Color: ${p.color || ''}`,\n    `Price: ${p.price ?? ''}`,\n    `Stock: ${p.stock ?? ''}`,\n    `Status: ${p.status || ''}`,\n    `Description: ${p.description || ''}`,\n  ].filter(l => (l.split(': ')[1] || '').toString().trim() !== '');\n  out.push({ json: {\n    content: lines.join('\\n'),\n    metadata: {\n      id: `product-${id}`,                              // stable Pinecone id\n      source: 'products_sheet',\n      type: 'product',\n      product_id: id,\n      name: name,\n      category: (p.category || '').toString()\n    }\n  }});\n}\nreturn out;\n"
+        "jsCode": "// Build Product Documents from Products sheet rows.\nconst items = $input.all();\nconst out = [];\nfor (const it of items) {\n  const p = it.json;\n  const status = (p.status || '').toString().trim().toLowerCase();\n  if (status && status !== 'active') continue;\n  const name = (p.name || '').toString().trim();\n  if (!name) continue;\n  const id = (p.product_id || `prd-${out.length+1}`).toString().trim();\n  const lines = [\n    `Type: Product`,\n    `Product ID: ${id}`,\n    `Name: ${name}`,\n    `Category: ${p.category || ''}`,\n    `Size: ${p.size || ''}`,\n    `Color: ${p.color || ''}`,\n    `Price: ${p.price ?? ''}`,\n    `Stock: ${p.stock ?? ''}`,\n    `Status: ${p.status || ''}`,\n    `Description: ${p.description || ''}`,\n  ].filter(l => (l.split(': ')[1] || '').toString().trim() !== '');\n  out.push({ json: {\n    content: lines.join('\\n'),\n    metadata: {\n      id: `product-${id}`,\n      source: 'products_sheet',\n      type: 'product',\n      product_id: id,\n      name: name,\n      category: (p.category || '').toString()\n    }\n  }});\n}\nreturn out;\n"
       },
-      "id": "e90763c2-b51d-4a22-92d6-86c090fdc60e",
+      "id": "cd5a4a40-859f-47c4-adec-14cc07514134",
       "name": "Build Product Documents",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        540,
-        80
+        1060,
+        160
       ]
     },
     {
@@ -106,26 +186,26 @@
           "dataStartRow": 5
         }
       },
-      "id": "4a9895b4-0b98-44e0-8461-2e5f4819358c",
+      "id": "b5f4e55f-bc30-40a4-828f-ded9218024b0",
       "name": "Get Setup",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4.5,
       "position": [
-        240,
+        760,
         380
       ],
       "continueOnFail": true
     },
     {
       "parameters": {
-        "jsCode": "// Build Setup Documents from Setup sheet rows.\n// Columns: key, value, notes\n// SECURITY: skip rows whose key looks like a token/secret OR whose value\n// is empty. Operational rules (REPLY_STYLE, MAX_MEMORY_TURNS, etc.)\n// are kept and indexed as bot configuration knowledge.\nconst items = $input.all();\nconst out = [];\nconst SECRET_RX = /(token|secret|password|api[_ ]?key|sheet[_ ]?id|chat[_ ]?id)/i;\nconst ALLOW_RX  = /(reply|style|memory|max|tone|language|hour|policy|rule|instruction|behavior|prompt)/i;\nfor (const it of items) {\n  const s = it.json;\n  const key = (s.key || '').toString().trim();\n  const val = (s.value === 0 ? '0' : (s.value || '').toString()).trim();\n  if (!key || !val) continue;                           // skip blanks\n  if (SECRET_RX.test(key) && !ALLOW_RX.test(key)) continue;  // skip secrets\n  const notes = (s.notes || '').toString().trim();\n  const stableId = key.toLowerCase().replace(/[^a-z0-9]+/g, '_');\n  const lines = [\n    `Type: Setup`,\n    `Key: ${key}`,\n    `Value: ${val}`,\n    notes ? `Notes: ${notes}` : '',\n  ].filter(Boolean);\n  out.push({ json: {\n    content: lines.join('\\n'),\n    metadata: {\n      id: `setup-${stableId}`,                          // stable Pinecone id\n      source: 'setup_sheet',\n      type: 'setup',\n      key: key\n    }\n  }});\n}\nreturn out;\n"
+        "jsCode": "// Build Setup Documents from Setup sheet rows.\nconst items = $input.all();\nconst out = [];\nconst SECRET_RX = /(token|secret|password|api[_ ]?key|sheet[_ ]?id|chat[_ ]?id)/i;\nconst ALLOW_RX  = /(reply|style|memory|max|tone|language|hour|policy|rule|instruction|behavior|prompt)/i;\nfor (const it of items) {\n  const s = it.json;\n  const key = (s.key || '').toString().trim();\n  const val = (s.value === 0 ? '0' : (s.value || '').toString()).trim();\n  if (!key || !val) continue;\n  if (SECRET_RX.test(key) && !ALLOW_RX.test(key)) continue;\n  const notes = (s.notes || '').toString().trim();\n  const stableId = key.toLowerCase().replace(/[^a-z0-9]+/g, '_');\n  const lines = [\n    `Type: Setup`,\n    `Key: ${key}`,\n    `Value: ${val}`,\n    notes ? `Notes: ${notes}` : '',\n  ].filter(Boolean);\n  out.push({ json: {\n    content: lines.join('\\n'),\n    metadata: {\n      id: `setup-${stableId}`,\n      source: 'setup_sheet',\n      type: 'setup',\n      key: key\n    }\n  }});\n}\nreturn out;\n"
       },
-      "id": "ab29ffb4-63ae-4061-b712-ce9a7b459de9",
+      "id": "7bae5e50-7e59-46f3-9333-e3a00a16e642",
       "name": "Build Setup Documents",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        540,
+        1060,
         380
       ]
     },
@@ -134,13 +214,13 @@
         "mode": "append",
         "numberInputs": 2
       },
-      "id": "98671258-0315-4829-8a47-bae3fdc7d470",
+      "id": "043eb359-9f26-404f-a052-3de7ce247140",
       "name": "Merge All Documents",
       "type": "n8n-nodes-base.merge",
       "typeVersion": 3,
       "position": [
-        880,
-        230
+        1380,
+        270
       ]
     },
     {
@@ -157,13 +237,13 @@
           "pineconeNamespace": "knowledge"
         }
       },
-      "id": "abc267d7-7d98-4bdf-aadc-318e8a8183ed",
+      "id": "3737f7cc-5656-4d3f-8608-627bfa850946",
       "name": "Pinecone Upsert",
       "type": "@n8n/n8n-nodes-langchain.vectorStorePinecone",
       "typeVersion": 1.1,
       "position": [
-        1200,
-        230
+        1700,
+        270
       ]
     },
     {
@@ -197,13 +277,13 @@
           }
         }
       },
-      "id": "a6adb1d2-c5e4-4bd6-988d-24fd7e081700",
+      "id": "3e3533d1-4dbc-44cd-aca6-b90f272c7f8b",
       "name": "Document Loader",
       "type": "@n8n/n8n-nodes-langchain.documentDefaultDataLoader",
       "typeVersion": 1.1,
       "position": [
-        1200,
-        460
+        1700,
+        500
       ]
     },
     {
@@ -212,13 +292,13 @@
         "chunkOverlap": 60,
         "options": {}
       },
-      "id": "028002f9-3e4c-4c5c-a393-fa9257c30bbb",
+      "id": "42f07171-c7af-432f-804d-1fa7bd06ac3f",
       "name": "Text Splitter",
       "type": "@n8n/n8n-nodes-langchain.textSplitterRecursiveCharacterTextSplitter",
       "typeVersion": 1,
       "position": [
-        1200,
-        680
+        1700,
+        720
       ]
     },
     {
@@ -226,18 +306,87 @@
         "modelName": "models/gemini-embedding-001",
         "options": {}
       },
-      "id": "8069e8b2-30c2-4d64-b016-039932993895",
+      "id": "4bf2f5d6-142e-45f1-8cf2-08e7cebf4a2b",
       "name": "Gemini Embeddings",
       "type": "@n8n/n8n-nodes-langchain.embeddingsGoogleGemini",
       "typeVersion": 1,
       "position": [
-        920,
-        460
+        1420,
+        500
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "id": "REPLACE_WITH_YOUR_GEMINI_CREDENTIAL_ID",
+          "name": "Google Gemini API (your AI Studio key)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "text-embedding-3-small",
+        "options": {}
+      },
+      "id": "88c3d31c-7c4a-4701-a096-c84bd08d4849",
+      "name": "OpenAI Embeddings (fallback)",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOpenAi",
+      "typeVersion": 1.2,
+      "position": [
+        1140,
+        500
+      ],
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "content": "### OpenAI fallback (disabled)\n\nIf Gemini still fails after credential fix:\n1. Disable `Gemini Embeddings`.\n2. Enable this node.\n3. Drag its `ai_embedding` output into `Pinecone Upsert`.\n4. Recreate Pinecone index at dim **1536** (cosine).\n5. Mirror this swap in Workflow 2.",
+        "height": 200,
+        "width": 280
+      },
+      "id": "b3eb6114-eacd-4082-ae42-01a08ca383f0",
+      "name": "Fallback note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1080,
+        720
       ]
     }
   ],
   "connections": {
     "Run Manually": {
+      "main": [
+        [
+          {
+            "node": "Validate Gemini Embeddings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Daily Schedule": {
+      "main": [
+        [
+          {
+            "node": "Validate Gemini Embeddings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Gemini Embeddings": {
+      "main": [
+        [
+          {
+            "node": "Vector OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Vector OK?": {
       "main": [
         [
           {
@@ -250,19 +399,10 @@
             "type": "main",
             "index": 0
           }
-        ]
-      ]
-    },
-    "Daily Schedule": {
-      "main": [
+        ],
         [
           {
-            "node": "Get Products",
-            "type": "main",
-            "index": 0
-          },
-          {
-            "node": "Get Setup",
+            "node": "Stop: Bad Embeddings",
             "type": "main",
             "index": 0
           }
